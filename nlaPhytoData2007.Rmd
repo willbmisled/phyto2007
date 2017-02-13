@@ -1,0 +1,111 @@
+---
+title: "nlaPhytoData2007"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+options("stringsAsFactors" = FALSE) 
+library(RODBC)
+library(dplyr)
+library(tidyr)
+```
+
+## Introduction
+
+#NOTE: This script must be run in 32bit R#
+
+* Download the NLA 2007 phytoplankton data for ordination
+* From this we will create three datasets
+    - allPhytoLong:  the data as downloaded from waterbodydatabase.mdb in long format; Data definitions: SITE_ID=the NLA siteID; VISIT_NO=Ignore this, we only include the first visit; LAKE_SAMP=Ignore this also, this shows we only included data for lakes sampled; DIVISION=taxonomic division for the OTU; OTU=lowest taxonomic definition for the phytoplankter.  In most cases this it the genus; Operational Taxonomic Unit; SumOfAbund=cells per ml for the OTU.  This is the sum because sometimes the OTU comprises 2 or more lower taxonomic levels.
+    - allPhytoWide=All phytoplankton data in wide format; the first column has the SITE_ID for the 2007 NLA lake; the next 260 columns are the individual abundances (cells/ml) of the individual phytoplankton OTUs
+    - cyanoWide=just the cyanophyta data in wide format.  Similar to allPhytoWide but only includes the cyano OTUs.
+* data saved as output/phytoDataNLA2007.rda
+
+
+```{r data, include=FALSE}
+
+#get the data
+con <- odbcConnectAccess("L:/Public/Milstead_Lakes/WaterbodyDatabase/WaterbodyDatabase.mdb")
+
+All <- sqlQuery(con, "
+SELECT tblNLA_nla_phyt_softcount_20091023.SITE_ID, tblNLA_nla_phyt_softcount_20091023.VISIT_NO, tblNLA_nla_phyt_softcount_20091023.LAKE_SAMP, tblNLA_nla_phyt_softcount_20091023.DIVISION, tblNLA_nla_phyt_softcount_20091023.OTU, Sum(tblNLA_nla_phyt_softcount_20091023.ABUND) AS SumOfABUND
+FROM tblNLA_nla_phyt_softcount_20091023
+GROUP BY tblNLA_nla_phyt_softcount_20091023.SITE_ID, tblNLA_nla_phyt_softcount_20091023.VISIT_NO, tblNLA_nla_phyt_softcount_20091023.LAKE_SAMP, tblNLA_nla_phyt_softcount_20091023.DIVISION, tblNLA_nla_phyt_softcount_20091023.OTU
+HAVING (((tblNLA_nla_phyt_softcount_20091023.VISIT_NO)=1) AND ((tblNLA_nla_phyt_softcount_20091023.LAKE_SAMP)='Target_Sampled'));
+")
+close(con)
+str(All)
+
+#Delete the OTUs that are placeholders
+#OTUs to delete
+delOTU<-c('Chamaesiphon','Chlorophyta','Chlorophyta coccoid','Chlorophyta Filament','Chrysophyta','Cuspidothrix issatschenkoi','Cyanophyta','Diatoma','Diatoms','Diatoms (dead)','Dinoflagellates','Eucocconeis','Euglenophyte','Heterocontophyta','Psammothidium','Stigeoclonium','Unknown alga','Unknown alga flagellated')
+
+All<-filter(All,!(OTU%in%delOTU)&!is.na(OTU))
+allPhytoLong<-filter(All,!(OTU%in%delOTU))
+
+#create allPhytoWide
+allPhytoWide <- spread(allPhytoLong[,-c(2:4)], OTU, SumOfABUND)
+  #replace NA with zero
+    allPhytoWide[is.na(allPhytoWide)]<-0
+    
+#create cyanoWide
+  cyanoWide<-spread(filter(All, DIVISION=="Cyanophyta")[,-c(2:4)], OTU, SumOfABUND)
+  #replace NA with zero
+    cyanoWide[is.na(cyanoWide)]<-0
+    
+#rename All
+    allPhytoLong<-All
+    
+#save data as phytoDataNLA2007.rda
+    save(allPhytoLong,allPhytoWide,cyanoWide, file='output/phytoDataNLA2007.rda')
+    
+```
+
+## Data Steps
+
+* get the phytoplankton data
+    - restrict to VISIT_NO==1 and LAKE_SAMP=='Target_Sampled'
+    - ABUND-summed by OTU to combine multiple taxa within an OTU
+* The following OTU's will be deleted.  These are unidentified taxa. 
+
+```{r delOTU, echo=FALSE}
+delOTU
+```
+
+* create allPhytoWide-a dataset with the SITE_ID, and the OTUs as the column names.  Values are the abundances for each OTU
+    - replace NA values with zeros
+* create cyanoWide-similar to allPhytoWide but with just the cyanophyta OTUs.
+    - replace NA values with zeros
+* rename All to allPhytoLong
+* save allPhytoLong, allPnytoWide, and cyanoWide as output/phytoDataNLA2007.rda
+
+##vegan
+* compare dissimilarity indices
+
+```{r vegan, echo=FALSE}
+#create community matrix
+  c1<-cyanoWide[,-1]
+  row.names(c1)<-cyanoWide[,1]
+  
+  p1<-allPhytoWide[,-1]
+  row.names(p1)<-allPhytoWide[,1]
+
+t1=metaMDS(p1, k=3,tryMax=20) 
+plot(t1)
+ordiplot(t1,type="p",choices=c(1,3))
+orditorp(t1,display="species",col="red",air=0.01)
+orditorp(t1,display="sites",cex=1.25,air=0.01)
+
+par(mfrow=c(2,2))
+ordiplot(t1,type="p",choices=c(1,2))
+ordiplot(t1,type="p",choices=c(1,3))
+ordiplot(t1,type="p",choices=c(2,3))
+
+t1
+str(t1)
+
+summary(t1$points)
+
+ 
+```
