@@ -29,36 +29,58 @@ library(tidyr)
 con <- odbcConnectAccess("L:/Public/Milstead_Lakes/WaterbodyDatabase/WaterbodyDatabase.mdb")
 
 All <- sqlQuery(con, "
-SELECT tblNLA_nla_phyt_softcount_20091023.SITE_ID, tblNLA_nla_phyt_softcount_20091023.VISIT_NO, tblNLA_nla_phyt_softcount_20091023.LAKE_SAMP, tblNLA_nla_phyt_softcount_20091023.DIVISION, tblNLA_nla_phyt_softcount_20091023.OTU, Sum(tblNLA_nla_phyt_softcount_20091023.ABUND) AS SumOfABUND
+SELECT tblNLA_nla_phyt_softcount_20091023.SITE_ID, tblNLA_nla_phyt_softcount_20091023.DIVISION, tblNLA_nla_phyt_softcount_20091023.OTU, Sum(tblNLA_nla_phyt_softcount_20091023.ABUND) AS SumOfABUND
 FROM tblNLA_nla_phyt_softcount_20091023
-GROUP BY tblNLA_nla_phyt_softcount_20091023.SITE_ID, tblNLA_nla_phyt_softcount_20091023.VISIT_NO, tblNLA_nla_phyt_softcount_20091023.LAKE_SAMP, tblNLA_nla_phyt_softcount_20091023.DIVISION, tblNLA_nla_phyt_softcount_20091023.OTU
-HAVING (((tblNLA_nla_phyt_softcount_20091023.VISIT_NO)=1) AND ((tblNLA_nla_phyt_softcount_20091023.LAKE_SAMP)='Target_Sampled'));
+WHERE (((tblNLA_nla_phyt_softcount_20091023.VISIT_NO)=1) AND ((tblNLA_nla_phyt_softcount_20091023.LAKE_SAMP)='Target_Sampled'))
+GROUP BY tblNLA_nla_phyt_softcount_20091023.SITE_ID, tblNLA_nla_phyt_softcount_20091023.DIVISION, tblNLA_nla_phyt_softcount_20091023.OTU;
 ")
 close(con)
 str(All)
+
+#get the unique siteIDs for visit_no=1 and lake_samp="lake_sampled"
+con <- odbcConnectAccess("L:/Public/Milstead_Lakes/WaterbodyDatabase/WaterbodyDatabase.mdb")
+ids <- sqlQuery(con, "
+SELECT NLA2007Sites_DesignInfo.SITE_ID
+FROM NLA2007Sites_DesignInfo
+WHERE (((NLA2007Sites_DesignInfo.VISIT_NO)=1) AND ((NLA2007Sites_DesignInfo.LAKE_SAMP)='Target_Sampled'))
+GROUP BY NLA2007Sites_DesignInfo.SITE_ID
+ORDER BY NLA2007Sites_DesignInfo.SITE_ID;
+")
+close(con)
+str(ids)
 
 #Delete the OTUs that are placeholders
 #OTUs to delete
 delOTU<-c('Chamaesiphon','Chlorophyta','Chlorophyta coccoid','Chlorophyta Filament','Chrysophyta','Cuspidothrix issatschenkoi','Cyanophyta','Diatoma','Diatoms','Diatoms (dead)','Dinoflagellates','Eucocconeis','Euglenophyte','Heterocontophyta','Psammothidium','Stigeoclonium','Unknown alga','Unknown alga flagellated')
 
-All<-filter(All,!(OTU%in%delOTU)&!is.na(OTU))
+#create allPhytoLong
 allPhytoLong<-filter(All,!(OTU%in%delOTU))
 
+#make sure all ID's included in allPhytoLong
+allPhytoLong<-left_join(ids,allPhytoLong)
+
 #create allPhytoWide
-allPhytoWide <- spread(allPhytoLong[,-c(2:4)], OTU, SumOfABUND)
+allPhytoWide <- spread(allPhytoLong[,-2], OTU, SumOfABUND)
   #replace NA with zero
     allPhytoWide[is.na(allPhytoWide)]<-0
+  #remove OTU=NA
+    allPhytoWide<-allPhytoWide[,-262]
     
+dim(allPhytoWide) #1152 262
+sum(allPhytoWide[,-1],na.rm=TRUE) #42311685
+    
+
 #create cyanoWide
-  cyanoWide<-spread(filter(All, DIVISION=="Cyanophyta")[,-c(2:4)], OTU, SumOfABUND)
+  cyanoWide<-spread(filter(allPhytoLong, DIVISION=="Cyanophyta")[,-2], OTU, SumOfABUND)
+  #make sure all ID's included 
+    cyanoWide<-left_join(ids,cyanoWide)
   #replace NA with zero
     cyanoWide[is.na(cyanoWide)]<-0
-    
-#rename All
-    allPhytoLong<-All
+  #remove OTU=NA
+    cyanoWide<-cyanoWide[,-262]
     
 #save data as phytoDataNLA2007.rda
-    save(allPhytoLong,allPhytoWide,cyanoWide, file='output/phytoDataNLA2007.rda')
+    save(allPhytoLong,allPhytoWide,cyanoWide, file='phytoDataNLA2007.rda')
     
 ```
 

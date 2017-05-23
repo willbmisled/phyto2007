@@ -1,0 +1,135 @@
+---
+title: "phytoData"
+author: "B"
+date: "Tuesday, October 27, 2015"
+output: html_document
+---
+```{r setup, include=FALSE, echo=FALSE, cache=FALSE} 
+#########function to install (if needed) and load R packages by list
+libs<-c("RODBC","dplyr") #list of packages to load
+
+installLoad<-function(pck){ #user defined function
+    if(!pck%in%installed.packages()){install.packages(pck)}
+    require(pck, character.only = TRUE)
+  }
+lapply(libs,function(x) installLoad(x))  #Load/Install require packages
+```
+
+To Do List
+-------------------------
+* check INDXSAMP_PHYT logic (see below)
+* add environmental data
+
+
+Introduction
+-------------------------
+Work with the NLA 2007 phytoplankton data
+
+Data Steps
+-------------------------
+
+* get the phytoplankton data from waterbodydatabase.mdb
+
+```{r phytoData, include=FALSE, echo=FALSE, cache=FALSE} 
+# Read data-****Make Sure the Path Is Correct****
+con <- odbcConnectAccess("c:/bryan/EPA/Data/WaterbodyDatabase/WaterbodyDatabase.mdb")
+phyto<- sqlQuery(con, "
+SELECT tblNLA_nla_phyt_softcount_20091023.SITE_ID, tblNLA_nla_phyt_softcount_20091023.VISIT_NO, tblNLA_nla_phyt_softcount_20091023.DATE_COL, tblNLA_nla_phyt_softcount_20091023.SAMPLED_PHYT, tblNLA_nla_phyt_softcount_20091023.SAMPLE_CATEGORY, tblNLA_nla_phyt_softcount_20091023.INDXSAMP_PHYT, tblNLA_nla_phyt_softcount_20091023.SAMPLE_DEPTH, tblNLA_nla_phyt_softcount_20091023.TAXATYPE, tblNLA_nla_phyt_softcount_20091023.OTU, tblNLA_nla_phyt_softcount_20091023.ABUND, tblNLA_nla_phyt_softcount_20091023.DIVISION, tblNLA_nla_phyt_softcount_20091023.FAMILY, tblNLA_nla_phyt_softcount_20091023.ORDER, tblNLA_nla_phyt_softcount_20091023.GENUS, tblNLA_nla_phyt_softcount_20091023.SPECIES, tblNLA_nla_phyt_softcount_20091023.VARIETY
+FROM tblNLA_nla_phyt_softcount_20091023;
+")
+close(con)
+#str(phyto)
+```
+
+* Data Filters
+
+    - **INDXSAMP_PHYT=='YES'**: NO=3776, YES=28195; This appears to be a field to identify which of multiple samples to use.  Additional samples collected as field duplicates (SAMPLE_CATEGORY=='D'), and potentially as VISIT_NO==2. 
+    - **SAMPLED_PHYT="YES"**; 3 lost samples removed
+* Check to see there is only one VISIT_NO per SITE_ID; there is.
+* Check to see there is only one ABUND per OTU & SITE_ID; 
+    - There are 1606 SITE_ID OTU combinations with multiple ABUND measures
+    - This happens when there are more than one taxa (e.g. two species in an OTU defined as a genus)
+    - Fix this by summing ABUND by SITE_ID and OTU
+    - create new data.frame "OTU" with the aggregated data
+* save data as an r dataset
+
+```{r filters, include=FALSE, echo=FALSE, cache=FALSE} 
+#explore the data first
+  table(phyto$INDXSAMP_PHYT) #NO=3776, YES=28195
+  length(unique(phyto[,'SITE_ID']))  #1157
+  length(unique(phyto[phyto$INDXSAMP_PHYT=='YES','SITE_ID'])) #1157
+  
+  table(phyto[phyto$INDXSAMP_PHYT=='YES','SAMPLE_CATEGORY']) #all are "P"
+  table(phyto[phyto$INDXSAMP_PHYT=='YES','SAMPLED_PHYT']) #3 were lost
+  table(phyto[phyto$INDXSAMP_PHYT=='YES','VISIT_NO']) #visit==1 28195
+#filter
+  #INDXSAMP_PHYT=='YES'
+    nrow(phyto) #31971
+    phyto<-phyto[phyto$INDXSAMP_PHYT=='YES',]
+    nrow(phyto) #28195
+  #SAMPLED_PHYT="YES"
+    phyto<-phyto[phyto$SAMPLED_PHYT=="YES",]
+    nrow(phyto) #27192
+
+#check that there is only one VISIT_NO per site
+q<-unique(phyto[,c('SITE_ID','VISIT_NO')])
+b<-tally(group_by(q,SITE_ID, VISIT_NO))
+nrow(b[b$n>1,]) #0
+
+#check that there is only one "ABUND" per SITE_ID and OTU
+b<-tally(group_by(phyto,SITE_ID, OTU))
+nrow(b)
+nrow(b[b$n>1,]) #1606 observations with more than one value for siteID
+
+#for SITE_ID/OTU combinations with multiple observations sum the results
+d<-summarise(group_by(phyto,SITE_ID, OTU), sumAbund=sum(ABUND))
+
+#create new data.frame "OTU" with the aggregated data
+OTU<-merge(b,d,by=c('SITE_ID','OTU'))
+
+#save
+  save(phyto,OTU,file='data/phyto.rda')
+```
+
+
+
+Data Definitions
+-------------------------
+
+* to access data use: load('data/phyto.rda')
+
+**data.frame: phyto obs.=`r nrow(phyto)`**
+
+Field  | Units | Description
+------------- | ------------- | -------------
+**SITE_ID** | (char) |Unique site identification number
+**VISIT_NO** | (num) |Lake visit number. 1-1st field sampling visit; 2-2nd field sampling visit; after filtering only sample 1 will remain.
+**DATE_COL** | (date) |Date of site visit
+**SAMPLED_PHYT** | (char) |Phytoplankton sample collected?
+**SAMPLE_CATEGORY** | (char) |(P)rimary or Field (D)uplicate
+**INDXSAMP_PHYT** | (YES/NO) |Index phytoplankton sample for site (YES/NO)-typically the Visit 1 Primary sample
+**SAMPLE_DEPTH** | (m) |Depth of integrated sample (typically 2 m)
+**TAXATYPE** | (cells/ml) |Type of algae
+**OTU** | (char) |Operational Taxonomic Unit 
+**ABUND** | (cells/mL) |Abundance
+**DIVISION** | (char) |Division name (from taxa list)
+**ORDER** | (char) |Order name (from taxa list)
+**FAMILY** | (char) |Family name (from taxa list)
+**GENUS** | (char) |Genus name (from taxa list)
+**SPECIES** | (char) |Species name (from taxa list)
+**VARIETY** | (char) |Variety name (from taxa list)
+
+**data.frame: OTU obs.=`r nrow(OTU)`**
+
+Field  | Units | Description
+------------- | ------------- | -------------
+**SITE_ID** | (char) |Unique site identification number
+**OTU** | (char) |Operational Taxonomic Unit
+**n** | (num) | number of observations in sumAbund
+**sumAbund** | (cells/mL) |Abundance of OTU; some OTU include multiple observations of lower taxonomic levels.  These are summed.
+
+
+  
+
+
+    

@@ -1,0 +1,84 @@
+---
+title: "esa_analysis"
+author: "Bryan Milstead"
+date: "`r format(Sys.time(), '%d %B %Y')`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+options(stringsAsFactors = FALSE) 
+library(knitr)
+library(vegan)
+library(ecodist)
+library(tidyverse)
+```
+
+## Introduction
+
+* modified from Betty_NMSCode_20160824.R
+
+* read taxonomy data
+* read phyto counts
+* join taxonomy and counts
+* filter
+    - !is.na(phylum)-this eliminates data without a valid genus name
+    - VISIT_NO==1
+    - LAKE_SAMP=='Target_Sampled'
+* sum abundance by site_id and genus
+* convert to wide format for NMS
+
+```{r data, include=FALSE, echo=FALSE, cache=FALSE} 
+#get the taxonomy dat
+tax<-read.csv(url('https://raw.githubusercontent.com/willbmisled/lakes_database/master/output/nla_phyto_taxonomy.csv'))
+
+#get the count data
+counts<-read.csv(url('https://www.epa.gov/sites/production/files/2014-10/nla2007_phytoplankton_softalgaecount_20091023.csv'))
+
+#merge tax and counts by genus and filter
+t2007<-left_join(counts,tax,by=c("GENUS"="genus"))%>%filter(!is.na(phylum),VISIT_NO==1,LAKE_SAMP=='Target_Sampled')
+    nrow(t2007) #26382
+    
+t2007 <- group_by(t2007,SITE_ID,GENUS)%>%
+  summarise(abund=sum(ABUND, na.rm = TRUE))
+    names(t2007)<-tolower(names(t2007))
+        nrow(t2007) #24151
+t2007<-ungroup(t2007)
+
+phyto<-spread(t2007,genus,abund)
+
+phyto[is.na(phyto)] <- 0 
+```
+
+* decide how many dimensions to use for the NMS
+
+```{r data, include=FALSE, echo=FALSE, cache=FALSE} 
+#Running NMS fit
+phytoNMS.2<-metaMDS(phyto[,-1],k=2,trymax=500)
+phytoNMS.3<-metaMDS(phytoWide[,-1],k=3,trymax=500)
+phytoNMS.4<-metaMDS(phytoWide[,-1],k=4,trymax=500)
+
+phytoNMS.5<-metaMDS(phytoWide[,-1],k=5,trymax=500)
+phytoNMS.6<-metaMDS(phytoWide[,-1],k=6,trymax=500)
+
+#save(phytoNMS.4,file="phytoNMS4.rda")
+#load(file="phytoNMS4.rda")
+```
+
+
+
+
+
+
+
+
+load("phyto.rda")
+data1<-read.csv(file="L:/Public/Betty/tox_data/Community_20160823/community_20160823/ltm_tox_20160810.csv")
+
+
+a<-OTU[,-3]
+
+
+
+```
